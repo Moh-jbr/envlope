@@ -1,0 +1,54 @@
+{
+  "name": "envlope",
+  "version": "0.1.0",
+  "description": "Encrypt your .env file with a key, push it to git safely, unlock with the same key.",
+  "keywords": [
+    "env",
+    "dotenv",
+    "encryption",
+    "secrets",
+    "cli",
+    "aes-256-gcm",
+    "git"
+  ],
+  "license": "MIT",
+  "author": "Mohamad <mohamad@4ow4.com>",
+  "type": "module",
+  "main": "dist/cli.cjs",
+  "module": "dist/cli.js",
+  "bin": {
+    "envlope": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write ."
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "commander": "^12.1.0",
+    "picocolors": "^1.0.1",
+    "update-notifier": "^7.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "@types/update-notifier": "^6.0.8",
+    "prettier": "^3.3.0",
+    "tsup": "^8.1.0",
+    "tsx": "^4.11.0",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}
