@@ -13,6 +13,14 @@
   ],
   "license": "MIT",
   "author": "Mohamad <mohamad@4ow4.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Moh-jbr/envlope.git"
+  },
+  "homepage": "https://github.com/Moh-jbr/envlope#readme",
+  "bugs": {
+    "url": "https://github.com/Moh-jbr/envlope/issues"
+  },
   "type": "module",
   "main": "dist/cli.cjs",
   "module": "dist/cli.js",
