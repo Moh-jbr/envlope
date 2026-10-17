@@ -1,5 +1,6 @@
-import { randomBytes } from "node:crypto";
-import { promptKey, UserCancelled } from "./ui.js";
+import { createHash, randomBytes } from "node:crypto";
+import { canPrompt, choose, promptKey, UserCancelled } from "./ui.js";
+import { WORDS } from "./words.js";
 
 const KEY_PREFIX = "envlope_key_";
 const KEY_BYTES = 32;
@@ -21,6 +22,33 @@ export function formatKey(key: Buffer): string {
     throw new Error(`Invalid key length: expected ${KEY_BYTES} bytes, got ${key.length}`);
   }
   return `${KEY_PREFIX}${key.toString("base64")}`;
+}
+
+/**
+ * A short ID for a key: 8 hex characters of a domain-separated SHA-256 of it.
+ * Teammates can compare fingerprints to check they hold the same key without
+ * exposing it. It gives an attacker nothing new: the committed ciphertext
+ * already lets anyone test a guessed key.
+ */
+export function fingerprint(key: Buffer): string {
+  return createHash("sha256")
+    .update("envlope-key-fingerprint\0")
+    .update(key)
+    .digest("hex")
+    .slice(0, 8);
+}
+
+/** Group a fingerprint for display: a3f907c2 → a3f9·07c2. */
+export function formatFingerprint(fp: string): string {
+  return `${fp.slice(0, 4)}·${fp.slice(4)}`;
+}
+
+/**
+ * The fingerprint's first three bytes as words, for comparing keys out loud:
+ * a3f907c2 → "opal-willow-aspen". A shorter check than the full fingerprint.
+ */
+export function fingerprintWords(fp: string): string {
+  return [0, 2, 4].map((i) => WORDS[parseInt(fp.slice(i, i + 2), 16)]).join("-");
 }
 
 export function parseKey(formatted: string): Buffer {
@@ -84,6 +112,41 @@ export async function resolveKey(
 
   const formatted = await promptKey(promptMessage);
   return parseKey(formatted);
+}
+
+/**
+ * When ENVLOPE_KEY already holds a valid key, offer it instead of a new one, so one
+ * key can cover many repos. Only in a terminal: scripts keep getting a fresh key
+ * unless they pass --key. Returns the key to use, null for a new one, or
+ * "cancelled".
+ */
+export async function offerEnvironmentKey(
+  options: { json?: boolean },
+  question: string,
+): Promise<Buffer | null | "cancelled"> {
+  const value = process.env[ENV_VAR_NAME];
+  if (!value || !canPrompt(options)) return null;
+  let key: Buffer;
+  try {
+    key = parseKey(value);
+  } catch {
+    return null;
+  }
+
+  const choice = await choose(
+    question,
+    [
+      {
+        value: "reuse",
+        label: "Use the key from ENVLOPE_KEY",
+        hint: fingerprintWords(fingerprint(key)),
+      },
+      { value: "new", label: "Generate a new key" },
+    ],
+    "reuse",
+  );
+  if (choice === null) return "cancelled";
+  return choice === "reuse" ? key : null;
 }
 
 export { UserCancelled };

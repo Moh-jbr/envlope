@@ -1,13 +1,21 @@
 import { decrypt, DecryptionError } from "../crypto.js";
-import { DEFAULT_ENV_FILE, encryptedExists, readEncrypted } from "../files.js";
-import { InvalidKeyError, resolveKey, UserCancelled } from "../key.js";
-import { Output } from "../output.js";
+import { encryptedExists, normalizeEnvFile, readEncrypted } from "../files.js";
+import {
+  fingerprint,
+  formatFingerprint,
+  InvalidKeyError,
+  resolveKey,
+  UserCancelled,
+} from "../key.js";
+import { listNames, Output } from "../output.js";
+import { parseEnv } from "../parse.js";
+import { closestName } from "../suggest.js";
 
 export async function viewCommand(
   variable: string,
   options: { file?: string; key?: string; json?: boolean } = {},
 ): Promise<number> {
-  const file = options.file ?? DEFAULT_ENV_FILE;
+  const file = normalizeEnvFile(options.file);
   const out = new Output(options.json);
 
   if (!encryptedExists(file)) {
@@ -39,24 +47,38 @@ export async function viewCommand(
     throw err;
   }
 
-  // Parse: simple KEY=VALUE per line, skip comments and blanks.
-  // No quoted-value or multi-line value support in v1 — keep it dumb.
-  const lines = plaintext.toString("utf8").split(/\r?\n/);
-  for (const line of lines) {
-    if (!line || line.trimStart().startsWith("#")) continue;
-    const eqIdx = line.indexOf("=");
-    if (eqIdx === -1) continue;
-    const name = line.slice(0, eqIdx).trim();
-    if (name !== variable) continue;
-    const value = line.slice(eqIdx + 1);
+  const vars = parseEnv(plaintext.toString("utf8"));
+  const value = vars.get(variable);
+  if (value === undefined) {
+    const names = [...vars.keys()];
+    const suggestion = closestName(variable, names);
+    const message = `Variable '${variable}' not found in ${file}.encrypted.`;
     if (options.json) {
-      out.emit({ variable, value });
+      out.fail(suggestion ? `${message} Did you mean ${suggestion}?` : message);
     } else {
-      out.raw(value);
+      // Hints go to stderr with the error, so a script's stdout stays empty.
+      out.fail(message);
+      if (suggestion) out.hint(`did you mean ${suggestion}?`);
+      if (names.length > 0) out.hint(`available: ${listNames(names, 12)}`);
     }
-    return 0;
+    return 1;
   }
 
-  out.fail(`Variable '${variable}' not found in ${file}.encrypted.`);
-  return 1;
+  if (options.json) {
+    out.emit({ variable, value });
+  } else if (out.isTTY) {
+    // A person at a terminal gets a label; pipes and $(…) get the bare value.
+    const chars = [...value].length;
+    const lines = value.split("\n").length;
+    const meta = [
+      ...(lines > 1 ? [`${lines} lines`] : []),
+      `${chars} char${chars === 1 ? "" : "s"}`,
+      `${file}.encrypted`,
+      `key ${formatFingerprint(fingerprint(key))}`,
+    ];
+    out.labeledValue(variable, value, meta.join(" · "));
+  } else {
+    out.raw(value);
+  }
+  return 0;
 }

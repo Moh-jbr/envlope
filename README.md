@@ -33,10 +33,15 @@ That's it. The command encrypts `.env` → `.env.encrypted`, adds `.env` to `.gi
   - [`envlope decrypt`](#envlope-decrypt)
   - [`envlope status`](#envlope-status)
   - [`envlope view`](#envlope-view)
+  - [`envlope run`](#envlope-run)
+  - [`envlope key`](#envlope-key)
 - [Common workflows](#common-workflows)
+  - [When a teammate updated `.env.encrypted` too](#when-a-teammate-updated-envencrypted-too)
+  - [Many repos at once (`--all`)](#many-repos-at-once---all)
   - [Sharing one key across multiple repos](#sharing-one-key-across-multiple-repos)
   - [Multiple env files (dev/staging/prod)](#multiple-env-files-devstagingprod)
-  - [Using `ENVLOPE_KEY` for CI/scripts](#using-envlope_key-for-ciscripts)
+  - [Keeping production secrets from interns and contractors](#keeping-production-secrets-from-interns-and-contractors)
+  - [Using `ENVLOPE_KEY` for CI/scripts](#using-envlope_key-set-the-key-once-every-command-picks-it-up)
   - [`--json` for automation](#--json-for-automation)
   - [Updating `.env` values](#updating-env-values)
   - [Rotating the key](#rotating-the-key)
@@ -135,14 +140,15 @@ npx envlope init
 Output:
 
 ```
-✓ Encrypted .env → .env.encrypted
+✓ Encrypted .env → .env.encrypted · 3 variables · AES-256-GCM
 ✓ Created .gitignore (added .env, .env.local, .env.encrypted.bak)
 
-SAVE THIS KEY — it cannot be recovered:
-────────────────────────────────────────────────────────────────
-   envlope_key_IiE85vhkdQLrNxksL9JWrWYOPHW35+gmJX366q8bapU=
-────────────────────────────────────────────────────────────────
-Save it in your password manager and share with teammates over a secure channel.
+╭─ SAVE THIS KEY · shown once ───────────────────────────────╮
+│                                                            │
+│  envlope_key_IiE85vhkdQLrNxksL9JWrWYOPHW35+gmJX366q8bapU=  │
+│  fingerprint  3723·1317 · crystal-castle-bison             │
+│                                                            │
+╰─ password manager → share over a secure channel ───────────╯
 
 Next:
   $ git add .env.encrypted .gitignore
@@ -174,7 +180,7 @@ They paste the key (you sent it via 1Password, Signal, or another secure channel
 
 ## Commands
 
-Every command accepts an optional positional `[file]` argument (default: `.env`), and every command supports `--json` for structured output.
+Every command accepts an optional positional `[file]` argument (default: `.env`), and every command supports `--json` for structured output. The file must be inside the current folder, because that folder's `.gitignore` is what protects it. `./.env.production` and `.\.env.production` work the same as `.env.production`.
 
 ### `envlope init`
 
@@ -205,11 +211,16 @@ npx envlope init --json
 | `-k, --key <key>` | Use a specific key instead of generating a new one. Useful for sharing one key across multiple repos. |
 | `-y, --yes`       | Skip the confirmation prompt when `<file>.encrypted` already exists.                                  |
 | `--json`          | Emit a single JSON object instead of human-readable text.                                            |
+| `--all`           | Set up every git repo in this folder, with one key or a key per group of repos. See [Many repos at once](#many-repos-at-once---all). |
+| `--only <patterns>` | With `--all`: only the repos whose folder names match, like `"*-back"`.                            |
 
 **Behavior notes:**
 
-- If `<file>.encrypted` already exists, the command warns you, asks for confirmation, and **backs up the old ciphertext to `<file>.encrypted.bak`** before replacing it. That backup is automatically gitignored.
+- If `<file>.encrypted` already exists, the command warns you, asks for confirmation, and **backs up the old ciphertext to `<file>.encrypted.bak`** before replacing it. That backup is automatically gitignored. Without a terminal (CI, piped stdin) or in `--json` mode it can't ask, so it exits with an error unless you pass `--yes`.
+- `.gitignore` entries are only added when no existing rule already covers them. If a broad rule such as `.env*` would also hide `<file>.encrypted`, a `!<file>.encrypted` exception is appended so `git add` works.
 - The generated key prints **once** to stdout. The tool does not save it anywhere. If you lose it, the encrypted file is unrecoverable.
+- In a terminal, if `ENVLOPE_KEY` already holds a key, `init` offers to use it instead of generating a new one, so a new repo can join the key your other repos use. Scripts still get a new key unless they pass `--key`.
+- Next to the key you get its **fingerprint**, e.g. `3723·1317`, also as three words you can read aloud: `crystal-castle-bison`. `encrypt`, `decrypt` and `view` print the fingerprint too (`key 3723·1317`), and [`envlope key`](#envlope-key) shows both forms any time, so teammates can confirm they hold the same key without pasting the key anywhere. `--json` output includes `fingerprint` (`"37231317"`) and `fingerprint_words`.
 
 ---
 
@@ -241,11 +252,27 @@ npx envlope encrypt --json
 | ----------------- | ---------------------------------------------------------------------------------------- |
 | `[file]`          | Positional. The env file to re-encrypt. Default: `.env`.                                 |
 | `-k, --key <key>` | The envlope key (otherwise read from `ENVLOPE_KEY` env var, otherwise prompted).        |
+| `--force`         | Encrypt even if `<file>.encrypted` changed since your env file was made, replacing that version. |
 | `--json`          | Emit a single JSON object instead of human-readable text.                                |
+| `--all`           | Re-encrypt in every git repo in this folder. See [Many repos at once](#many-repos-at-once---all). |
+| `--only <patterns>` | With `--all`: only the repos whose folder names match, like `"*-back"`.                |
 
 **Behavior notes:**
 
 - Before re-encrypting, the command verifies the provided key actually matches the current `<file>.encrypted`. If the key has been rotated (via `envlope init`), the old key is rejected with a clear error.
+- **It won't silently undo a teammate's update.** If `<file>.encrypted` changed since your env file was made (say a `git pull` brought a teammate's version), encrypting would replace their changes. So `encrypt` shows, by name, what each side changed. In a terminal it then offers to merge, overwrite or cancel; without one it refuses unless you pass `--force`. See [When a teammate updated `.env.encrypted` too](#when-a-teammate-updated-envencrypted-too).
+- If the plaintext hasn't changed since it was last encrypted, `<file>.encrypted` is left untouched, so there's no git diff to commit. `--json` output reports this as `"changed": false`.
+- After re-encrypting, it lists which variables you added (`+`), changed (`~`) or removed (`-`), by name only. Values are never printed. `--json` output includes the same lists as `variables: {added, changed, removed}`.
+
+  ```
+  ✓ Updated .env.encrypted — ready to commit · key 3723·1317
+
+      + SENTRY_DSN
+      ~ DATABASE_URL
+      - LEGACY_TOKEN
+
+    3 changes · 4 variables · values are never printed
+  ```
 - Errors cleanly if no `<file>.encrypted` exists yet (use `init` first).
 
 ---
@@ -283,27 +310,47 @@ npx envlope decrypt --json --key ... --yes
 | `-k, --key <key>` | The envlope key (otherwise read from `ENVLOPE_KEY` env var, otherwise prompted). |
 | `-y, --yes`       | Overwrite an existing decrypted file without prompting.                            |
 | `--json`          | Emit a single JSON object instead of human-readable text.                          |
+| `--all`           | Decrypt in every git repo in this folder. See [Many repos at once](#many-repos-at-once---all). |
+| `--only <patterns>` | With `--all`: only the repos whose folder names match, like `"*-back"`.          |
 
 **Behavior notes:**
 
-- If the plaintext file already exists, the command prompts before overwriting (unless `--yes`).
+- If the plaintext file already exists with the same content, nothing is written and there's nothing to confirm.
+- If it differs, the command lists which variables an overwrite would replace, remove or add (names only) and asks before overwriting, unless you pass `--yes`. Without a terminal or in `--json` mode it can't ask, so it exits with an error that names those variables.
+
+  ```
+  ▲  .env already exists and differs from .env.encrypted
+  │
+  │  changed   DATABASE_URL   your local value is replaced
+  │  removed   DEBUG          only in your local .env
+  │
+  ◆  Overwrite .env?
+  │  ○ Yes / ● No
+  └
+  ```
 - A wrong key fails fast with `Invalid key — decryption failed.` — no stack trace, no leaked information.
 
 ---
 
 ### `envlope status`
 
-Quick health check for a project's env file. Reports whether the plaintext and encrypted files exist, whether they're in sync, when the ciphertext was last updated, and whether `.gitignore` is protecting the plaintext.
+Quick health check for a project's env file, as a checklist. It reports whether the plaintext and encrypted files exist, whether they're in sync, which ignore rule protects the plaintext, and whether the encrypted file can be committed. Every problem comes with the command or edit that fixes it.
+
+```
+envlope status · .env
+
+  ✓ .env                        170 B · edited 3m ago
+  ✓ .env.encrypted              275 B · written 2h ago
+  ✗ sync                        .env changed after the last encrypt
+                                fix: envlope encrypt
+  ✓ .env ignored                rule .env (.gitignore line 1)
+  ✓ .env.encrypted committable  not ignored
+
+  1 problem
+```
 
 ```bash
 npx envlope status
-
-# Output:
-# File: .env
-# ✓ .env exists
-# ✓ .env.encrypted exists (last encrypted 2h ago)
-# ✓ .env and .env.encrypted are in sync
-# ✓ .gitignore protects .env
 
 # Check a specific file
 npx envlope status .env.production
@@ -322,8 +369,10 @@ npx envlope status --strict
 | `[file]`   | Positional. The env file to check. Default: `.env`.                                    |
 | `--json`   | Emit a single JSON object instead of human-readable text.                              |
 | `--strict` | Exit with code 1 if the plaintext file is newer than the encrypted file (drift check). |
+| `--all`    | Check every git repo in this folder. See [Many repos at once](#many-repos-at-once---all). |
+| `--only <patterns>` | With `--all`: only the repos whose folder names match, like `"*-back"`.       |
 
-No key is required — `status` only inspects file metadata, never reads the encrypted contents.
+No key is required — `status` only inspects file metadata, never reads the encrypted contents. Ignore rules are checked with `git check-ignore`, so rules in parent directories, `.git/info/exclude` and your global gitignore all count; outside a git repo, the `.gitignore` in the current directory is used. If git already tracks the plaintext file, `status` reports it as unprotected whatever `.gitignore` says, since a tracked file keeps being committed, and shows `git rm --cached` as the fix. `init` and `decrypt` warn about this too. In a git repo, `status` also flags a `<file>.encrypted` that changed since your env file was made, such as a teammate's version from `git pull` (the "up to date" row). It also flags other plaintext env files next to yours, like `.env.bak` or `.env.pre-tunnel`, when git tracks them or could commit them: they hold the same secrets, but no rule envlope writes covers them. Templates (`*.example`) are left out. `--json` output adds `problems`, `issues` (each with `check`, `detail` and `fix`), `gitignore_rule`, `tracked`, `behind`, `encrypted_committable` and `other_env_files` to the fields above.
 
 ---
 
@@ -359,13 +408,119 @@ npx envlope view DATABASE_URL --json
 
 **Behavior notes:**
 
-- Returns exit code 1 if the variable isn't found in the env file, with a clear error message.
+- In an interactive terminal, the value is labeled with its name, length, source file and key fingerprint. When the output goes to a pipe or a `$(…)` command substitution, only the raw value is printed, so scripts are unaffected.
+- Returns exit code 1 if the variable isn't found in the env file. The error suggests the closest name (`did you mean DATABASE_URL?`) and lists the available names on stderr, so a script's stdout stays empty.
 - Reads the encrypted file in memory only — the plaintext env never touches disk.
-- Parsing is intentionally simple: `KEY=VALUE` per line. Comments (`#`) and blank lines are skipped. Quoted values and multi-line values are not interpreted specially; the entire string after the first `=` is returned verbatim.
+- Values are parsed with the same rules as the `dotenv` package, so you get what your app would load: an `export ` prefix and `NAME: value` lines are allowed, quotes (`"…"`, `'…'`, `` `…` ``) are removed and may span multiple lines, `\n` inside double quotes becomes a newline, unquoted values stop at `#` (inline comment), and if a name is defined twice the last one wins.
+
+---
+
+### `envlope run`
+
+Run a command with the decrypted variables in its environment. The plaintext is decrypted in memory and never written to disk, so there's no `.env` lying around to leak.
+
+`run` keeps secrets off disk, not out of sight. The command gets every value, so its code can print them (`console.log(process.env.STRIPE_KEY)`), and whoever has the key can also read them with `envlope view` or `envlope decrypt`. To keep secrets from someone, don't give them that key: see [Keeping production secrets from interns and contractors](#keeping-production-secrets-from-interns-and-contractors).
+
+```bash
+# Start your app with the variables from .env.encrypted
+npx envlope run -- npm run dev
+
+# Another env file
+npx envlope run --file .env.production -- node server.js
+
+# The command's own options pass straight through
+npx envlope run -- npm test -- --watch
+```
+
+**Options:**
+
+| Flag                | Description                                                                         |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| `<command...>`      | **Required.** The command to run. Put envlope's own options before it.              |
+| `-f, --file <file>` | The env file to use. Default: `.env`.                                               |
+| `-k, --key <key>`   | The envlope key (otherwise read from `ENVLOPE_KEY` env var, otherwise prompted).   |
+| `--override`        | Let the file's values replace variables already set in your environment.            |
+
+**Behavior notes:**
+
+- Variables already set in your environment win, as with dotenv. Pass `--override` to let the file's values replace them.
+- `ENVLOPE_KEY` is removed from the command's environment: it gets the secrets it needs, not the key to all of them.
+- envlope exits with the command's exit code, or 127 if the command isn't found. Ctrl-C goes to the command, and envlope waits for it to finish.
+- In an interactive terminal, one line on stderr says how many variables were loaded and with which key. Scripts and CI see only the command's own output.
+- Works on Windows too, including `npm`, `npx` and other `.cmd` launchers, with arguments passed through exactly.
+- Shell syntax in the command is expanded by your shell before envlope runs, so `envlope run -- echo $API_URL` prints your shell's value. To use an injected variable in a shell expression, run a shell: `envlope run -- sh -c 'echo $API_URL'`.
+
+---
+
+### `envlope key`
+
+Show which key you have: its fingerprint as three words you can read aloud, the hex fingerprint, where the key came from, and which encrypted files in this folder it opens.
+
+```
+$ npx envlope key
+key  zephyr-blossom-bronze  (ff14·18fe)
+     from ENVLOPE_KEY
+     ✓ opens .env.encrypted
+     ✗ doesn't open .env.production.encrypted
+```
+
+Teammates can compare the words on a call to confirm they hold the same key without sharing it. The words come from the first 24 bits of the fingerprint, so they're a quick check rather than a full match. Exits with code 1 if there are encrypted files here and the key opens none of them. `--json` returns `fingerprint`, `fingerprint_words`, `source` and `files`.
+
+`envlope key --all` checks the key against every git repo in this folder instead, and in a terminal lets you try more keys on the repos it doesn't open, which maps out which key opens which repo. See [Many repos at once](#many-repos-at-once---all).
 
 ---
 
 ## Common workflows
+
+### Many repos at once (`--all`)
+
+If your repos sit side by side in one folder, run `init`, `encrypt`, `decrypt`, `status` or `key` from that folder with `--all`. It runs in every git repo directly inside the folder (each folder with a `.git`; anything else is left alone), prints a row for each repo as it's done, and ends with totals.
+
+```
+$ cd ~/work/acme
+$ npx envlope decrypt --all
+envlope decrypt --all · 41 repos in acme
+
+key 3723·1317 · crystal-castle-bison · from ENVLOPE_KEY
+  ✓ billing-back      decrypted
+  ✓ gateway-back      already matches
+  ▲ users-back        .env has local changes (decrypting would replace DB_URL)
+  ...
+
+○ 3 repos need a different key: admin-front, shop-front, web-front
+◆  Try another key on them?
+│  ● Enter another key
+│  ○ Skip them
+```
+
+**Setting up with `init --all`.** In a terminal, `init --all` asks how to lock the repos that have a `.env`:
+
+1. **One key for all of them, or different keys** for different repos, like one for the backend and one for the frontend.
+2. With different keys: **how many**, then **which repos each key is for**. envlope suggests groups from the folder names ("Names like `*-back`"), takes a pattern you type, or lets you tick repos in a list. The list scrolls, `a` ticks them all, and the last key starts with every repo still left.
+3. **Where each key comes from:** a new key, the key in `ENVLOPE_KEY`, or one you paste, such as the backend key you already use.
+
+It shows the plan and asks before it encrypts anything. Each new key is shown once at the end, with the repos it opens. Repos that already have a `.env.encrypted` are left alone unless you say so (or pass `--yes`), because re-encrypting retires their current key; a repo that the chosen key already opens is never rewritten. Without a terminal, or with `--json`, `init --all` locks every repo with one new key, or with `--key`.
+
+**Day to day.** `decrypt --all`, `encrypt --all` and `key --all` use your key (from `--key`, `ENVLOPE_KEY` or the prompt) on every repo it opens and set the others aside. In a terminal they then offer to try another key on those, as many times as it takes, so one run covers repos with different keys. Questions wait until the end instead of interrupting the run:
+
+- `decrypt --all`: repos where decrypting would overwrite local changes. Keep the changes, go through the repos one by one (see what differs, then decide), or overwrite them all.
+- `encrypt --all`: repos where someone else's newer `.env.encrypted` arrived, say with `git pull`. Go through them one by one with `encrypt`'s merge, or leave them for later.
+
+Without a terminal those repos are reported and the exit code is 1: `decrypt --all --yes` overwrites local changes and `encrypt --all --force` replaces the newer version. `status --all` checks every repo and lists each problem with its fix, including stray plaintext copies such as `.env.bak`.
+
+**Choosing repos.** `--only` narrows any `--all` run by folder name. Separate patterns with commas; `*` and `?` are wildcards, `!` leaves names out, and case doesn't matter.
+
+```bash
+npx envlope status --all                                  # every repo
+npx envlope encrypt --all --only "*-back"                 # just the backend repos
+npx envlope decrypt --all --only "*,!legacy-*"            # all but the legacy ones
+npx envlope init --all --only "*-front" --key $FRONT_KEY  # scripted: one given key
+npx envlope status --all --strict                         # CI: fail on unencrypted edits
+```
+
+With `--json` you get one object: `folder`, `command`, `file`, `repos` and `summary`. Each repo has `repo`, `status` (`done`, `unchanged`, `attention`, `other_key`, `skipped` or `problem`), `detail`, any `notes` and `warnings`, and the command's own JSON as `result`. `summary` counts the statuses. `init --all` adds `keys`: each key's `fingerprint`, its `source`, the repos it opens, and the `key` itself when it's new.
+
+---
 
 ### Sharing one key across multiple repos
 
@@ -385,6 +540,8 @@ npx envlope init --key envlope_key_<paste-here>
 ```
 
 Now one shared key unlocks every repo's secrets. Onboarding a new teammate becomes **one** key, not twenty.
+
+If the repos sit in one folder, `envlope init --all` does this in a single run, and can give different groups of repos different keys. See [Many repos at once](#many-repos-at-once---all).
 
 ---
 
@@ -412,6 +569,34 @@ npx envlope status .env.production
 ```
 
 Each `<file>.encrypted` is its own ciphertext; teammates only need the key for the environments they have access to.
+
+---
+
+### Keeping production secrets from interns and contractors
+
+Anyone who can run your app with a secret can read it. The app's code can print it (`console.log(process.env.STRIPE_KEY)`), and the key that lets them use `envlope run` also lets them use `envlope decrypt`. No tool can hand someone a working secret and keep it hidden from them. A password on `decrypt` wouldn't help either: whoever has the key can decrypt the file without envlope, since the format is [documented](#how-it-works-technical).
+
+So rather than hiding production secrets from people, don't give them those secrets. Keep one env file per audience, each with its own key:
+
+```bash
+# Values everyone on the team may see: test API keys (like Stripe's sk_test_...),
+# a local or shared dev database
+npx envlope init .env.development    # prints the dev key: share it with interns
+
+# The real thing, for the people and CI that deploy
+npx envlope init .env.production     # prints the prod key: keep it to those few
+```
+
+An intern gets only the dev key and runs the app with it:
+
+```bash
+npx envlope run --file .env.development -- npm run dev
+```
+
+- `envlope key` lists which encrypted files a key opens, so you can check that the dev key opens `.env.development.encrypted` and nothing else.
+- With many repos, `npx envlope init .env.development --all` sets them all up with one dev key, or a key per group of repos.
+- An intern often needs fewer secrets than you'd think: a frontend can talk to a shared staging API instead of holding any backend credentials.
+- If someone already has a key they shouldn't keep (an intern who was given the prod key, or anyone who leaves), a new envlope key isn't enough, because they've seen the values. Rotate the secrets where they're issued (a new Stripe key, a new database password), then encrypt the new values under a new key with `envlope init`.
 
 ---
 
@@ -512,7 +697,7 @@ Store the key as a repository secret (`Settings → Secrets and variables → Ac
 
 ### `--json` for automation
 
-Every command emits a single line of JSON to stdout when `--json` is passed. Errors emit `{"error": "...", "code": 1}` on the same channel.
+Every command emits a single line of JSON to stdout when `--json` is passed. Errors emit `{"error": "...", "code": 1}` on the same channel. Where a script might want to act on the cause, the error also has a `reason`: `no_env`, `not_set_up`, `wrong_key`, `unreadable`, `already_set_up` (from `init`), `local_changes` (from `decrypt`, with the affected names as `variables`) or `newer_version` (from `encrypt`). Results carry `warnings` when there's a risk to know about, like a plaintext file that git tracks.
 
 ```bash
 # Check sync state in CI
@@ -552,6 +737,32 @@ git push
 When teammates pull, they re-run `envlope decrypt` to pick up the changes.
 
 Tip: run `envlope status` before committing to confirm `.env` and `.env.encrypted` are in sync.
+
+---
+
+### When a teammate updated `.env.encrypted` too
+
+Say you edited `.env`, and meanwhile a teammate pushed their own change to `.env.encrypted`, which you then pulled. Encrypting your `.env` as it is would quietly undo their change. envlope remembers which version of `.env.encrypted` your `.env` came from (kept inside `.git`, never committed, and only the encrypted form), so `encrypt` notices and shows what each side changed:
+
+```
+▲  .env.encrypted changed since your .env was made (a teammate's update?)
+│
+│  theirs   + SENTRY_DSN  ~ API_KEY
+│  yours    ~ DEBUG
+│
+◆  What do you want to do?
+│  ● Merge: keep your changes and theirs
+│  ○ Overwrite their version with your .env (their changes are lost)
+│  ○ Cancel
+└
+```
+
+- **Merge** puts their changes and yours into both `.env` and `.env.encrypted`, variable by variable. Comments and line order come from their version.
+- If you both changed the same variable to different values, there's no Merge option: back up your `.env`, run `envlope decrypt --yes`, redo your changes, and encrypt again.
+- If you have no changes of your own, the first option takes their version instead (the same as `envlope decrypt`).
+- Without a terminal (CI, scripts, `--json`), `encrypt` refuses and explains, unless you pass `--force` to replace their version.
+
+This works once envlope has recorded a version for your `.env`, which `init`, `decrypt` and `encrypt` all do, in a git repo.
 
 ---
 
@@ -601,14 +812,14 @@ This generates a fresh key and a fresh encrypted file. The old ciphertext goes t
 
 - Store it in a password manager (1Password, Bitwarden, etc.), not in plaintext anywhere.
 - Share over a secure channel (encrypted DM, password manager sharing, in person) — never in a public Slack channel, email body, or commit message.
-- Rotate the key (`envlope init`) whenever someone leaves the team or you suspect the key was exposed.
+- Rotate the key (`envlope init`) whenever someone leaves the team or you suspect the key was exposed. Rotate the secrets themselves too, where they're issued: a new key keeps that person out of future versions, but they may already have seen the current values.
 - The tool does **not** back up the key. If everyone loses it, the encrypted file is computationally unrecoverable.
 
 **What about pushing the encrypted file to a public repo?** Yes, that's exactly what envlope is designed for. AES-256-GCM with a 256-bit random key has no known practical attack — making the ciphertext public exposes nothing as long as the key stays private.
 
 **What envlope does NOT protect against:**
 
-- A compromised teammate who has the key — they can decrypt everything.
+- Anyone who has the key, a compromised teammate included: they can decrypt everything it opens. `envlope run` doesn't hide values from them either, since the command it runs can print them. Give people who should see only some secrets a separate env file with its own key (see [Keeping production secrets from interns and contractors](#keeping-production-secrets-from-interns-and-contractors)).
 - A keylogger on a teammate's machine that captures the key when they type it.
 - A leaked `.env` file (the plaintext one) committed to git by accident — the encryption only protects what you encrypt.
 - An attacker with shell access to a machine that has the decrypted `.env` sitting on disk.
@@ -648,7 +859,7 @@ You ran a command that requires an existing encrypted file but it isn't here. Ei
 
 ### `Variable 'XYZ' not found in .env.encrypted.`
 
-From `envlope view`. The variable name doesn't exist in the decrypted env file. Check spelling and that you're targeting the right file.
+From `envlope view`. The variable name doesn't exist in the decrypted env file. The lines under the error suggest the closest name and list the ones that exist. Check spelling and that you're targeting the right file.
 
 ### `envlope: command not found` after `npm i envlope`
 
@@ -685,7 +896,9 @@ The `envlope:1:` prefix is a version tag — if the format ever changes in a bac
 
 **Crypto implementation lives in [`src/crypto.ts`](./src/crypto.ts)** — ~50 lines, uses only Node's built-in `node:crypto` module. No third-party crypto dependencies.
 
-**No background processes, no network calls (except the optional update-notifier version check), no telemetry.** The tool only reads/writes:
+**Key fingerprint:** the first 8 hex characters of SHA-256(`"envlope-key-fingerprint\0"` + key). It's safe to share: anyone with the committed ciphertext can already check a guessed key, so the fingerprint gives them nothing new.
+
+**No telemetry, and no network calls except update-notifier's version check.** That check runs at most once a day in a detached background process, and only when envlope's output goes to an interactive terminal. It never runs when output is piped or redirected (as in most scripts and CI), or in `--json` mode. Set `NO_UPDATE_NOTIFIER=1` to turn it off. Apart from update-notifier's own cache file, the tool only reads/writes:
 
 - `.env` (or whichever env file you pointed it at — the plaintext)
 - `.env.encrypted` (the ciphertext)
@@ -721,6 +934,24 @@ npm run build
 ```
 
 Test coverage spans crypto round-trips, key format validation, multi-file flows, env var resolution, JSON output, and end-to-end CLI tests against temp directories. See [`tests/`](./tests/).
+
+### Releasing
+
+Pushing a version tag publishes to npm. [`.github/workflows/publish.yml`](./.github/workflows/publish.yml) checks that the tag matches `package.json`, runs the type-check, tests and build, then publishes with npm's [trusted publishing](https://docs.npmjs.com/trusted-publishers): no npm token is stored anywhere, and each release gets a provenance statement linking it to the run that built it.
+
+One-time setup: on npmjs.com, open the package's **Settings → Trusted Publisher**, choose **GitHub Actions**, and enter `Moh-jbr`, `envlope` and `publish.yml`. Or, logged in to npm with 2FA on, run `npx npm@12 trust github envlope --file publish.yml --repo Moh-jbr/envlope --allow-publish`. npm expires a new trusted publisher that hasn't published within 2 days, so set it up right before your first tagged release.
+
+```bash
+# 1. Add the new version's section to CHANGELOG.md, and commit it
+
+# 2. Bump the version: commits package.json and package-lock.json, and tags it vX.Y.Z
+npm version minor        # or patch, or major
+
+# 3. Push the commit and the tag
+git push --follow-tags
+```
+
+A version with a hyphen, like `v0.3.0-beta.1`, is published under the `next` dist-tag, so `npm install envlope` keeps getting the latest stable version.
 
 ---
 

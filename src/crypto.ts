@@ -6,7 +6,15 @@ const TAG_LENGTH = 16;
 const FORMAT_VERSION = 1;
 
 export class DecryptionError extends Error {
-  constructor(message: string) {
+  /**
+   * @param wrongKey true when the file is an envlope file the key doesn't open (or one
+   * that was tampered with: AES-GCM can't tell the two apart), false when the file
+   * itself is unreadable.
+   */
+  constructor(
+    message: string,
+    public readonly wrongKey = false,
+  ) {
     super(message);
     this.name = "DecryptionError";
   }
@@ -59,6 +67,6 @@ export function decrypt(blob: string, key: Buffer): Buffer {
   try {
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   } catch {
-    throw new DecryptionError("Invalid key — decryption failed.");
+    throw new DecryptionError("Invalid key — decryption failed.", true);
   }
 }

@@ -1,0 +1,75 @@
+name: Publish
+
+# Publishes to npm when a version tag such as v0.2.0 is pushed. It uses npm's trusted
+# publishing, so no npm token is stored anywhere, and npm attaches a provenance
+# statement linking each release to the run that built it.
+#
+# One-time setup on npmjs.com: the package's Settings → Trusted Publisher → GitHub
+# Actions, with user "Moh-jbr", repository "envlope" and workflow "publish.yml".
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # lets npm verify this run, instead of a token
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false # a release build never reuses a cache
+
+      - name: Check the tag matches package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in package.json. Tag the commit that sets the version (v$version), or bump the version first."
+            exit 1
+          fi
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - name: Update npm
+        run: npm install -g npm@^11.5.1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke-test the built CLI
+        run: test "$(node dist/cli.js --version)" = "$(node -p "require('./package.json').version")"
+
+      - name: Publish
+        run: |
+          # A pre-release such as v0.3.0-beta.1 goes to the "next" tag, so a plain
+          # npm install keeps getting the latest stable version.
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            npm publish --tag next
+          else
+            npm publish
+          fi

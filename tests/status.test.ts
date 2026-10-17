@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -45,8 +52,10 @@ describe("status command", () => {
 
     const result = run(project, ["status"]);
     expect(result.code).toBe(0);
-    expect(result.stdout).toMatch(/in sync/);
-    expect(result.stdout).toMatch(/\.gitignore protects/);
+    expect(result.stdout).toMatch(/✓ sync +in sync/);
+    expect(result.stdout).toMatch(/✓ \.env ignored +rule \.env \(\.gitignore line 1\)/);
+    expect(result.stdout).toMatch(/✓ \.env\.encrypted committable +not ignored/);
+    expect(result.stdout).toMatch(/No problems/);
   });
 
   it("reports drift when .env is newer than .env.encrypted", () => {
@@ -119,7 +128,64 @@ describe("status command", () => {
       env_exists: true,
       encrypted_exists: true,
       gitignored: true,
+      gitignore_rule: { source: ".gitignore", line: 1, pattern: ".env" },
+      encrypted_committable: true,
+      problems: 0,
     });
     expect(typeof data.last_encrypted).toBe("string");
+  });
+
+  it("puts the fix under each problem and counts problems", () => {
+    writeFileSync(join(project, ".env"), "X=1\n");
+    run(project, ["init"]);
+    const future = new Date(Date.now() + 2000);
+    utimesSync(join(project, ".env"), future, future);
+
+    const result = run(project, ["status"]);
+    expect(result.stdout).toMatch(
+      /✗ sync +\.env changed after the last encrypt\n +fix: envlope encrypt\n/,
+    );
+    expect(result.stdout).toMatch(/1 problem\n/);
+    expect(JSON.parse(run(project, ["status", "--json"]).stdout).problems).toBe(1);
+  });
+
+  it("flags a .gitignore rule that hides the ciphertext, naming the rule", () => {
+    writeFileSync(join(project, ".gitignore"), "# env\n.env*\n");
+    writeFileSync(join(project, ".env"), "X=1\n");
+    writeFileSync(join(project, ".env.encrypted"), "envlope:1:placeholder\n");
+
+    const result = run(project, ["status"]);
+    expect(result.stdout).toMatch(/✓ \.env ignored +rule \.env\* \(\.gitignore line 2\)/);
+    expect(result.stdout).toMatch(
+      /✗ \.env\.encrypted committable +ignored by rule \.env\* \(\.gitignore line 2\)\n +fix: add !\.env\.encrypted to \.gitignore/,
+    );
+    const data = JSON.parse(run(project, ["status", "--json"]).stdout);
+    expect(data.encrypted_committable).toBe(false);
+    expect(data.problems).toBe(1);
+
+    // The fix it suggests resolves the problem.
+    appendFileSync(join(project, ".gitignore"), "!.env.encrypted\n");
+    expect(run(project, ["status"]).stdout).toMatch(
+      /✓ \.env\.encrypted committable +rule !\.env\.encrypted \(\.gitignore line 3\)/,
+    );
+  });
+
+  it("suggests envlope init when the ciphertext doesn't exist yet", () => {
+    writeFileSync(join(project, ".env"), "X=1\n");
+    const result = run(project, ["status", "--strict"]);
+    expect(result.code).toBe(0); // --strict still only fails on drift
+    expect(result.stdout).toMatch(/✗ \.env\.encrypted +not created yet\n +fix: envlope init\n/);
+  });
+
+  it("asks git, so rules outside .gitignore count too", () => {
+    expect(spawnSync("git", ["init", "-q"], { cwd: project }).status).toBe(0);
+    // .git/info/ comes from git's templates, which a system may not have.
+    mkdirSync(join(project, ".git", "info"), { recursive: true });
+    appendFileSync(join(project, ".git", "info", "exclude"), "\n.env\n");
+    writeFileSync(join(project, ".env"), "X=1\n");
+
+    const data = JSON.parse(run(project, ["status", "--json"]).stdout);
+    expect(data.gitignored).toBe(true);
+    expect(data.gitignore_rule).toMatchObject({ source: ".git/info/exclude", pattern: ".env" });
   });
 });
