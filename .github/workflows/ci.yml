@@ -39,3 +39,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Smoke-test built CLI
+        run: node dist/cli.js --version

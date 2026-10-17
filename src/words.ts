@@ -1,0 +1,38 @@
+// 256 short, common words that are easy to say and hard to mishear: one per byte
+// value, so three of them name a key fingerprint out loud ("amber-otter-canyon").
+// Kept as a compact grid: one word per line would only make it harder to scan.
+// prettier-ignore
+export const WORDS = [
+  "acorn", "alpine", "amber", "anchor", "apple", "apricot", "arrow", "aspen",
+  "atlas", "autumn", "badger", "bamboo", "banjo", "barley", "basil", "beacon",
+  "beaver", "berry", "birch", "bison", "blossom", "bonfire", "breeze", "brook",
+  "bronze", "buffalo", "button", "cabin", "cactus", "camel", "candle", "canoe",
+  "canyon", "caramel", "cargo", "castle", "cedar", "cello", "cherry", "chestnut",
+  "cider", "cinnamon", "citrus", "clover", "cobalt", "cocoa", "comet", "compass",
+  "copper", "coral", "cotton", "cougar", "coyote", "crater", "cricket", "crystal",
+  "cypress", "daisy", "dawn", "delta", "desert", "diamond", "dolphin", "dragon",
+  "drum", "dune", "eagle", "echo", "eclipse", "ember", "emerald", "falcon",
+  "feather", "fern", "fiddle", "fig", "firefly", "flint", "forest", "fossil",
+  "fox", "frost", "galaxy", "garden", "garnet", "gecko", "geyser", "ginger",
+  "glacier", "globe", "granite", "grape", "gravel", "griffin", "harbor", "harvest",
+  "hazel", "hedge", "heron", "hickory", "honey", "horizon", "husky", "iceberg",
+  "igloo", "indigo", "iris", "island", "ivory", "jade", "jaguar", "jasmine",
+  "jelly", "jester", "jungle", "kayak", "kelp", "kettle", "kite", "kiwi",
+  "koala", "lagoon", "lantern", "lark", "lava", "lemon", "lilac", "lily",
+  "lime", "lion", "lizard", "llama", "lobster", "locket", "lotus", "lunar",
+  "lynx", "magnet", "magpie", "mango", "maple", "marble", "meadow", "melon",
+  "meteor", "mint", "mirror", "mocha", "monsoon", "moose", "mosaic", "moss",
+  "mustang", "nectar", "nebula", "nickel", "noodle", "nutmeg", "oak", "oasis",
+  "ocean", "olive", "onyx", "opal", "orbit", "orchid", "osprey", "otter",
+  "owl", "oyster", "paddle", "panda", "panther", "papaya", "parrot", "peach",
+  "pebble", "pecan", "pelican", "penguin", "pepper", "pigeon", "pine", "planet",
+  "plum", "polar", "pony", "poppy", "prairie", "prism", "puffin", "pumpkin",
+  "quartz", "quill", "rabbit", "radish", "rain", "raven", "reef", "rhino",
+  "ribbon", "river", "robin", "rocket", "ruby", "saffron", "sage", "salmon",
+  "sapphire", "satin", "saturn", "scarlet", "seal", "sequoia", "shell", "sierra",
+  "silver", "slate", "snow", "sparrow", "spruce", "squid", "star", "stone",
+  "storm", "sugar", "summit", "sunset", "swan", "tango", "teal", "thistle",
+  "thunder", "tiger", "timber", "topaz", "tornado", "toucan", "trout", "tulip",
+  "tundra", "turtle", "umber", "valley", "velvet", "violet", "volcano", "walnut",
+  "walrus", "willow", "wolf", "yak", "yarrow", "zebra", "zenith", "zephyr",
+];

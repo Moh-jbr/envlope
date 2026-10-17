@@ -1,6 +1,6 @@
 {
   "name": "envlope",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Encrypt your .env file with a key, push it to git safely, unlock with the same key.",
   "keywords": [
     "env",
@@ -22,8 +22,6 @@
     "url": "https://github.com/Moh-jbr/envlope/issues"
   },
   "type": "module",
-  "main": "dist/cli.cjs",
-  "module": "dist/cli.js",
   "bin": {
     "envlope": "dist/cli.js"
   },
@@ -45,6 +43,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@clack/core": "^0.3.5",
     "@clack/prompts": "^0.7.0",
     "commander": "^12.1.0",
     "picocolors": "^1.0.1",
