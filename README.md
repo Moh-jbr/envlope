@@ -935,6 +935,24 @@ npm run build
 
 Test coverage spans crypto round-trips, key format validation, multi-file flows, env var resolution, JSON output, and end-to-end CLI tests against temp directories. See [`tests/`](./tests/).
 
+### Releasing
+
+Pushing a version tag publishes to npm. [`.github/workflows/publish.yml`](./.github/workflows/publish.yml) checks that the tag matches `package.json`, runs the type-check, tests and build, then publishes with npm's [trusted publishing](https://docs.npmjs.com/trusted-publishers): no npm token is stored anywhere, and each release gets a provenance statement linking it to the run that built it.
+
+One-time setup: on npmjs.com, open the package's **Settings → Trusted Publisher**, choose **GitHub Actions**, and enter `Moh-jbr`, `envlope` and `publish.yml`. Or, logged in to npm with 2FA on, run `npx npm@12 trust github envlope --file publish.yml --repo Moh-jbr/envlope --allow-publish`. npm expires a new trusted publisher that hasn't published within 2 days, so set it up right before your first tagged release.
+
+```bash
+# 1. Add the new version's section to CHANGELOG.md, and commit it
+
+# 2. Bump the version: commits package.json and package-lock.json, and tags it vX.Y.Z
+npm version minor        # or patch, or major
+
+# 3. Push the commit and the tag
+git push --follow-tags
+```
+
+A version with a hyphen, like `v0.3.0-beta.1`, is published under the `next` dist-tag, so `npm install envlope` keeps getting the latest stable version.
+
 ---
 
 ## Changelog
